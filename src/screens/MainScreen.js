@@ -1,9 +1,9 @@
 // src/screens/MainScreen.js
-import React, { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
-import { View, StyleSheet, StatusBar, AppState, Alert, Platform } from 'react-native'; // Added Platform
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, StyleSheet, StatusBar, AppState, Alert, Platform } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import Svg, { Path } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context'; // <-- Import the hook
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Components
 import ErrorMessageDisplay from '../components/ErrorMessageDisplay';
@@ -12,6 +12,7 @@ import ControlButtons from '../components/ControlButtons';
 import FlightControls from '../components/FlightControls';
 import StatusBox from '../components/StatusBox';
 import MediaControls from '../components/MediaControls';
+import VirtualJoystick from '../components/VirtualJoystick'; // <-- Import Joystick
 
 // Redux and Services
 import {
@@ -24,9 +25,12 @@ import * as telloService from '../services/telloService';
 import * as orientationService from '../services/orientationService';
 import * as ffmpegService from '../services/ffmpegService';
 
+
+const RC_MAX_VALUE = 100; // Tello expects values between -100 and 100
+
 const MainScreen = () => {
   const dispatch = useDispatch();
-  const insets = useSafeAreaInsets(); // <--- Get safe area insets
+  const insets = useSafeAreaInsets();
 
   // --- Refs for dynamic layout calculations ---
   const flightControlsRef = useRef(null);
@@ -45,8 +49,14 @@ const MainScreen = () => {
     lastUpdate,
   } = useSelector((state) => state.tello);
 
+  // isConnected is true only when streaming is active
   const isConnected = isStreaming;
   const [isRecording, setIsRecording] = useState(false);
+
+  // --- Refs for RC Control ---
+  const leftStick = useRef({ x: 0, y: 0 });
+  const rightStick = useRef({ x: 0, y: 0 });
+ 
 
   // --- Callback for Status Updates ---
   const handleStatusUpdate = useCallback((statusData) => {
@@ -72,31 +82,33 @@ const MainScreen = () => {
     return () => {
       console.log("MainScreen: Closing Tello Service on unmount...");
       telloService.close();
+      
     };
-  }, [handleStatusUpdate, dispatch]);
+  }, [handleStatusUpdate, dispatch]); // Include dispatch
 
   // Orientation, FFmpeg, App State
   useEffect(() => {
     orientationService.lockLandscape();
     ffmpegService.configure();
     const handleAppStateChange = (nextAppState) => {
-      if (nextAppState.match(/inactive|background/) && isStreaming) {
+      // If app goes to background/inactive while connected, disconnect
+      if (nextAppState.match(/inactive|background/) && isConnected) { // Check isConnected (which is isStreaming)
+        console.log("App inactive, dispatching disconnect...");
         dispatch(disconnect());
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => {
       subscription.remove();
-      if (isStreaming) { // Check state from closure
-           console.log("Stopping FFmpeg on unmount (from App State Effect)...");
-           ffmpegService.stop().catch(e => console.error("Error stopping ffmpeg on unmount:", e));
-       }
-       orientationService.unlock();
+      // Cleanup orientation lock if needed (though locking on mount is more common)
+      orientationService.unlock();
+      // FFmpeg stop is handled by disconnect thunk or this effect's dependency change
     };
-  }, [dispatch, isStreaming]); // isStreaming dependency is correct here
+  }, [dispatch, isConnected]); // Depend on isConnected now
+
+   
 
   // --- Layout Measurement ---
-  // Measure components after they render to position dependents correctly
   const onFlightControlsLayout = (event) => {
       const { width } = event.nativeEvent.layout;
       if (width > 0 && width !== flightControlsWidth) {
@@ -142,11 +154,14 @@ const MainScreen = () => {
      if (!isConnecting && !isConnected) {
        dispatch(connectAndStream()).catch(err => { console.error("Connect dispatch error", err)});
      }
-   }, [dispatch, isConnecting, isConnected]); // Add dependencies
+   }, [dispatch, isConnecting, isConnected]);
 
    const handleDisconnect = useCallback(() => {
      dispatch(disconnect()).catch(err => { console.error("Disconnect dispatch error", err)});
-   }, [dispatch]); // Add dependency
+     // Reset joystick values immediately on disconnect request
+     leftStick.current = { x: 0, y: 0 };
+     rightStick.current = { x: 0, y: 0 };
+   }, [dispatch]);
 
    // --- Media Handlers ---
   const handlePhotoCapture = useCallback(() => {
@@ -161,6 +176,23 @@ const MainScreen = () => {
     Alert.alert("Recording", `${nextRecordingState ? 'Started' : 'Stopped'} recording (simulated)!`); // Placeholder
   }, [isRecording, isConnected]);
 
+   // --- RC Command Handling Callbacks ---
+
+  // Callback for Left Joystick movement
+  const handleLeftJoystickMove = useCallback(({ x, y }) => {
+    // Left Stick: X = Yaw, Y = Throttle
+    // Invert Y axis: Up on stick = positive Y Tello value
+    leftStick.current = { x: x, y: -y };
+  }, []); // No dependencies needed
+
+  // Callback for Right Joystick movement
+  const handleRightJoystickMove = useCallback(({ x, y }) => {
+    // Right Stick: X = Roll, Y = Pitch
+    // Invert Y axis: Up on stick = positive Y Tello value (forward)
+    rightStick.current = { x: x, y: -y };
+  }, []); // No dependencies needed
+
+
   // --- Helper for Battery Color ---
   const getBatteryColor = () => {
     if (battery === null || battery === undefined) return '#9ca3af';
@@ -171,12 +203,12 @@ const MainScreen = () => {
 
    // --- Define margins/paddings relative to safe area ---
    const safeAreaPadding = {
-       top: Platform.OS === 'android' ? 10 : 15, // Reduce top padding slightly
+       top: Platform.OS === 'android' ? 5 : 10, // Adjusted top padding
        side: 15,
-       controlsTopMargin: 10,
-       verticalGap: 8, // Consistent vertical gap
-       horizontalGap: 12, // Consistent horizontal gap
-       statusBoxHeightEstimate: 30, // Keep estimate for initial render
+       controlsTopMargin: 10, // Base top margin for controls
+       verticalGap: 8,
+       horizontalGap: 12,
+       statusBoxHeightEstimate: 30,
    };
 
   // --- Render ---
@@ -188,17 +220,18 @@ const MainScreen = () => {
       <TelloVideoPlayer isStreaming={isConnected} videoUrl={videoUrl} />
 
        {/* Error display (absolute, respects top safe area, centered) */}
-       {/* Position it slightly below the very top controls */}
-      <View style={[styles.errorContainer, { top: insets.top + safeAreaPadding.controlsTopMargin + 50, left: insets.left + safeAreaPadding.side, right: insets.right + safeAreaPadding.side }]}>
+       {/* Position it below the Connect button */}
+      <View style={[styles.errorContainer, { top: insets.top + safeAreaPadding.controlsTopMargin + 60, /* Adjust 60 based on button height */ left: insets.left + safeAreaPadding.side, right: insets.right + safeAreaPadding.side }]}>
           <ErrorMessageDisplay message={errorMessage} />
       </View>
 
 
       {/* --- Absolutely Positioned Controls Overlay --- */}
+      {/* Use pointerEvents to allow joystick touches to pass through empty space */}
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
 
           {/* Connect/Disconnect Button (Top Center) */}
-          <View style={[styles.controlButtonsContainer, { top: insets.top + safeAreaPadding.controlsTopMargin + 10 }]}>
+          <View style={[styles.controlButtonsContainer, { top: insets.top + safeAreaPadding.controlsTopMargin }]}>
             <ControlButtons
               isConnected={isConnected}
               isConnecting={isConnecting}
@@ -209,12 +242,12 @@ const MainScreen = () => {
 
           {/* Flight Controls (Top Left) */}
           <View
-             ref={flightControlsRef} // Add ref
-             onLayout={onFlightControlsLayout} // Add layout handler
+             ref={flightControlsRef}
+             onLayout={onFlightControlsLayout}
              style={[styles.flightControlsContainer, { top: insets.top + safeAreaPadding.controlsTopMargin, left: insets.left + safeAreaPadding.side }]}
-             pointerEvents="box-none" // Allow touches on children
+             pointerEvents="box-none" // Container itself doesn't block touches
           >
-             <FlightControls
+             <FlightControls // FlightControls buttons ARE touchable
                 isConnected={isConnected}
                 onTakeoff={handleTakeoff}
                 onLand={handleLand}
@@ -223,9 +256,8 @@ const MainScreen = () => {
           </View>
 
           {/* Battery Display (Top Left, next to flight controls) */}
-          {/* Uses measured flightControlsWidth */}
           <View style={[styles.statusContainer, {
-                top: insets.top + safeAreaPadding.controlsTopMargin + 25,
+                top: insets.top + safeAreaPadding.controlsTopMargin + 25, // Align top with flight controls
                 left: insets.left + safeAreaPadding.side + flightControlsWidth + safeAreaPadding.horizontalGap
              }]}
              pointerEvents="box-none"
@@ -240,12 +272,12 @@ const MainScreen = () => {
 
           {/* Media Controls (Top Right) */}
           <View
-             ref={mediaControlsRef} // Add ref
-             onLayout={onMediaControlsLayout} // Add layout handler
+             ref={mediaControlsRef}
+             onLayout={onMediaControlsLayout}
              style={[styles.mediaControlsContainer, { top: insets.top + safeAreaPadding.controlsTopMargin, right: insets.right + safeAreaPadding.side }]}
-             pointerEvents="box-none" // Allow touches on children
+             pointerEvents="box-none"
            >
-              <MediaControls
+              <MediaControls // MediaControls buttons ARE touchable
                   isEnabled={isConnected}
                   isRecording={isRecording}
                   onCapturePress={handlePhotoCapture}
@@ -254,7 +286,6 @@ const MainScreen = () => {
           </View>
 
            {/* Flight Time Display (Top Right, below Media Controls) */}
-           {/* Uses measured mediaControlsHeight */}
           <View style={[styles.statusContainer, {
                 top: insets.top + safeAreaPadding.controlsTopMargin + mediaControlsHeight + safeAreaPadding.verticalGap,
                 right: insets.right + safeAreaPadding.side
@@ -271,7 +302,6 @@ const MainScreen = () => {
 
           {/* Last Update Display (Top Right, below Flight Time) */}
           <View style={[styles.statusContainer, {
-                // Position below flight time: Top + MediaControls Height + Flight Time Box Height (estimate) + 2 gaps
                 top: insets.top + safeAreaPadding.controlsTopMargin + mediaControlsHeight + safeAreaPadding.statusBoxHeightEstimate + (safeAreaPadding.verticalGap * 2),
                 right: insets.right + safeAreaPadding.side
             }]}
@@ -285,6 +315,16 @@ const MainScreen = () => {
               />
           </View>
 
+            {/* --- VIRTUAL JOYSTICK --- */}
+            {/* Render conditionally */}
+            {
+                <VirtualJoystick
+                    onLeftJoystickMove={handleLeftJoystickMove}
+                    onRightJoystickMove={handleRightJoystickMove}
+                />
+            }
+
+
       </View>{/* End Controls Overlay */}
     </View> // End fullScreenContainer
   );
@@ -293,19 +333,18 @@ const MainScreen = () => {
 // --- Styles ---
 const styles = StyleSheet.create({
   fullScreenContainer: {
-    flex: 1,
+    flex: 1, // Important for GestureHandlerRootView and general layout
     backgroundColor: '#000',
   },
   errorContainer: {
      position: 'absolute',
-     alignItems: 'center', // Center the error message horizontally
+     alignItems: 'center', // Center the error message content
      zIndex: 100,
      // top, left, right applied inline
   },
-  // Containers for absolutely positioned controls
   controlButtonsContainer: {
       position: 'absolute',
-      alignSelf: 'center', // Center horizontally
+      alignSelf: 'center',
       zIndex: 50,
       // top applied inline
   },
@@ -319,7 +358,6 @@ const styles = StyleSheet.create({
       zIndex: 40,
       // top, right applied inline
    },
-  // Generic container for status boxes to apply position/zIndex
   statusContainer: {
     position: 'absolute',
     zIndex: 30,

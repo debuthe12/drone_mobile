@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     height:20,
     width:70,
     top: 15,
-    left: 0, // Align to left
+    left: -50, // Align to left
     right: 10, // Align to right
     alignItems: 'center', // Center children horizontally
     zIndex: 5,
