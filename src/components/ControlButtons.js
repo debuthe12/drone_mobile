@@ -124,14 +124,16 @@ const ControlButtons = ({ isConnected, isConnecting, onConnectPress, onDisconnec
 const styles = StyleSheet.create({
   outerContainer: {
     position: 'absolute',
-    top: 20,
+    height:20,
+    width:70,
+    top: 15,
     left: 0, // Align to left
     right: 10, // Align to right
     alignItems: 'center', // Center children horizontally
     zIndex: 5,
   },
   pressable: {
-    paddingVertical: 6, // Increased vertical padding
+    paddingVertical: 8, // Increased vertical padding
     paddingHorizontal: 12, // Increased horizontal padding
     backgroundColor: 'rgba(0, 0, 0, 0.5)', // Semi-transparent black background
     borderRadius: 9999, // Fully rounded ends

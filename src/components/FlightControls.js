@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
   container: {
     position: 'absolute',
     top: 20,
-    left: 32,
+    left: 0,
     zIndex: 10,
     flexDirection: 'row',
     gap: 12, // Space between buttons

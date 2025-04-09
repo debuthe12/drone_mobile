@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
     // Position below the FlightControls row (FlightControls at top: 20, height ~40)
     top: 20, // (20 + 40 + gap 10) - Adjust as needed
     // Align left edge with the FlightControls container
-    right:30,
+    right:0,
     zIndex: 25,
     flexDirection: 'row', // Arrange buttons side-by-side HORIZONTALLY
     gap: 10, // Horizontal space between buttons
