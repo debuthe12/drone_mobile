@@ -10,8 +10,6 @@
     "test": "jest"
   },
   "dependencies": {
-    "@react-native-camera-roll/camera-roll": "^7.10.0",
-    "@react-native-community/netinfo": "^11.4.1",
     "@reduxjs/toolkit": "^2.6.1",
     "ffmpeg-kit-react-native": "^6.0.2",
     "react": "19.0.0",
