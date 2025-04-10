@@ -1,4 +1,4 @@
-package com.to
+package com.Drone
 
 import android.app.Application
 import com.facebook.react.PackageList
